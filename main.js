@@ -1,6 +1,6 @@
 // MDTV Overlay : fenêtre transparente, toujours au-dessus de HotS, qui affiche la page #/en-jeu.
 // Verrouillé (par défaut) : les clics traversent le panneau. Ctrl+Maj+D : déverrouiller pour le déplacer / changer de build.
-const { app, BrowserWindow, globalShortcut, screen, Tray, Menu, nativeImage } = require("electron");
+const { app, BrowserWindow, globalShortcut, screen, Tray, Menu, nativeImage, shell } = require("electron");
 const fs = require("fs"), path = require("path");
 
 const PAGE = "https://mdtv-hots.pages.dev/";
@@ -28,8 +28,22 @@ function creer() {
   const memoriser = () => ecrire({ ...lire(), ...fenetre.getBounds() });
   fenetre.on("moved", memoriser); fenetre.on("resized", memoriser);
   // Liens externes (téléchargement, Heroes Profile…) : dans le navigateur, pas dans l'overlay.
-  fenetre.webContents.setWindowOpenHandler(({ url }) => { require("electron").shell.openExternal(url); return { action: "deny" }; });
+  // Seulement du https : un lien « file: » ou un protocole système ne doit jamais être lancé.
+  fenetre.webContents.setWindowOpenHandler(({ url }) => { if (enHttps(url)) shell.openExternal(url); return { action: "deny" }; });
+  // Dans l'overlay, on ne navigue que sur la page MDTV et la connexion Discord.
+  const garder = (e, url) => { if (!autorise(url)) { e.preventDefault(); if (enHttps(url)) shell.openExternal(url); } };
+  fenetre.webContents.on("will-navigate", garder);
+  fenetre.webContents.on("will-redirect", garder);
+  // Ni micro, ni caméra, ni position, ni partage d'écran.
+  const ses = fenetre.webContents.session;
+  ses.setPermissionRequestHandler((wc, perm, rep) => rep(false));
+  ses.setPermissionCheckHandler(() => false);
+  ses.setDisplayMediaRequestHandler((req, rep) => rep({}));
+  ses.setDevicePermissionHandler(() => false);
 }
+
+const enHttps = url => { try { return new URL(url).protocol === "https:"; } catch { return false; } };
+const autorise = url => { try { const u = new URL(url); return u.protocol === "https:" && ["mdtv-hots.pages.dev", "discord.com"].includes(u.hostname); } catch { return false; } };
 
 function appliquerVerrou() {
   fenetre.setIgnoreMouseEvents(verrouille, { forward: true });
