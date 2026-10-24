@@ -8,7 +8,8 @@ par-dessus le jeu, dans une fenêtre transparente. Rien n'est injecté dans le j
 2. Choisis ton héros, un build (titre + auteur), puis **Enregistrer**.
 3. Dans HotS, règle l'affichage sur « Plein écran (fenêtré) ». L'overlay détecte le jeu tout seul
    (sinon il affiche « En attente : jeu non lancé »).
-4. En partie, **F5** affiche / cache le build. **Ctrl+Maj+D** : déplacer le panneau, puis Ctrl+Maj+D pour le fixer.
+4. En partie, **F5** affiche / cache le build, **F6** affiche / cache les sorts animés du héros (un seul à la fois).
+   **Ctrl+Maj+D** : déplacer le panneau, puis Ctrl+Maj+D pour le fixer.
 5. Détection du héros : renseigne ton BattleTag sur le site. Au chargement d'une partie, l'overlay lit le fichier
    que HotS écrit lui-même (`replay.server.battlelobby`, avec [HeroesDecode](https://github.com/HeroesToolChest/HeroesDecode), MIT)
    et affiche ton dernier build pour ton héros. Pour fabriquer l'appli : `./recuperer-heroesdecode.sh` puis `npm run dist`.

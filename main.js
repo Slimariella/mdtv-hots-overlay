@@ -1,7 +1,7 @@
 // MDTV Overlay : deux fenêtres sur la page MDTV.
 // - Réglage (opaque, ouverte au lancement) : connexion Discord dans le navigateur, choix du héros et du build, « Enregistrer ».
-// - Panneau (transparent, clics traversants, au-dessus de HotS) : le build enregistré seul, affiché / caché par F5.
-// F5 n'est pris que pendant que HotS tourne (détecté toutes les 3 s) : le reste du temps, F5 garde son rôle habituel.
+// - Panneau (transparent, clics traversants, au-dessus de HotS) : le build (F5) ou les sorts animés du héros (F6), un à la fois.
+// F5/F6 ne sont pris que pendant que HotS tourne (détecté toutes les 3 s) : le reste du temps, ils gardent leur rôle habituel.
 const { app, BrowserWindow, globalShortcut, screen, Tray, Menu, nativeImage, shell, ipcMain } = require("electron");
 const fs = require("fs"), path = require("path"), crypto = require("crypto"), { execFile } = require("child_process");
 const { extraireJoueurs } = require("./detection-partie");
@@ -13,7 +13,7 @@ const fichier = () => path.join(app.getPath("userData"), "reglages.json");
 const lire = () => { try { return JSON.parse(fs.readFileSync(fichier(), "utf8")); } catch { return {}; } };
 const ecrire = r => fs.writeFileSync(fichier(), JSON.stringify(r));
 
-let reglage, panneau, barre, verrouille = true, cssVerrou, jeuLance = false;
+let reglage, panneau, barre, verrouille = true, cssVerrou, jeuLance = false, mode = "build"; // mode : "build" | "sorts", ce qu'affiche le panneau
 
 const enHttps = url => { try { return new URL(url).protocol === "https:"; } catch { return false; } };
 const surMdtv = url => { try { const u = new URL(url); return u.protocol === "https:" && u.hostname === "mdtv-hots.pages.dev"; } catch { return false; } };
@@ -76,10 +76,17 @@ function appliquerVerrou() {
 }
 const deplacer = () => { verrouille = !verrouille; appliquerVerrou(); };
 
-function basculer() {
-  if (!lire().build) return ouvrirReglage(); // rien d'enregistré : rien à afficher
-  panneau.isVisible() ? panneau.hide() : panneau.showInactive();
+// F5 (build) et F6 (sorts) partagent le même panneau : si déjà visible dans ce mode, on cache ;
+// sinon on charge la bonne page (seulement si le mode change) et on affiche.
+function basculerVue(nouveauMode, suffixe) {
+  const r = lire();
+  if (!r.build) return ouvrirReglage(); // rien d'enregistré : rien à afficher
+  if (panneau.isVisible() && mode === nouveauMode) return panneau.hide();
+  if (mode !== nouveauMode) { panneau.loadURL(PAGE + r.build + suffixe); mode = nouveauMode; }
+  panneau.showInactive();
 }
+const basculerBuild = () => basculerVue("build", "");
+const basculerSorts = () => basculerVue("sorts", "/sorts");
 
 // --- Détection de HotS ---------------------------------------------------------------------------------
 function verifierJeu() {
@@ -92,10 +99,10 @@ function changerEtat(lance) {
   if (lance === jeuLance) return;
   jeuLance = lance;
   journal(lance ? "HotS détecté" : "HotS fermé");
-  if (lance) globalShortcut.register("F5", basculer);
-  else { globalShortcut.unregister("F5"); panneau.hide(); }
+  if (lance) { globalShortcut.register("F5", basculerBuild); globalShortcut.register("F6", basculerSorts); }
+  else { globalShortcut.unregister("F5"); globalShortcut.unregister("F6"); panneau.hide(); }
   envoyerEtat();
-  barre?.setToolTip(lance ? "MDTV Overlay — jeu détecté, F5 pour le build" : "MDTV Overlay — en attente du jeu");
+  barre?.setToolTip(lance ? "MDTV Overlay — jeu détecté, F5 le build / F6 les sorts" : "MDTV Overlay — en attente du jeu");
   barre?.setContextMenu(menu());
 }
 const etat = () => ({ jeu: jeuLance, build: lire().build || null });
@@ -171,7 +178,7 @@ function recevoirLien(lien) {
   if (!r.etatConnexion || p.get("state") !== r.etatConnexion || !/^[\w.-]{10,200}$/.test(jeton || "")) return ouvrirReglage();
   delete r.etatConnexion; ecrire(r);
   reglage.webContents.executeJavaScript(`localStorage.setItem("jeton", ${JSON.stringify(jeton)}); location.reload();`);
-  if (r.build) panneau.loadURL(PAGE + r.build);
+  if (r.build) { panneau.loadURL(PAGE + r.build); mode = "build"; }
   ouvrirReglage();
 }
 
@@ -181,7 +188,7 @@ ipcMain.on("connecter", e => deMdtv(e) && connecter());
 ipcMain.on("enregistrer", (e, lien, afficherMaintenant) => {
   if (!deMdtv(e) || !/^#\/en-jeu\/[\w-]+\/\d{0,7}$/.test(lien)) return;
   ecrire({ ...lire(), build: lien });
-  panneau.loadURL(PAGE + lien);
+  panneau.loadURL(PAGE + lien); mode = "build";
   envoyerEtat();
   if (afficherMaintenant && jeuLance) panneau.showInactive(); // détection auto : pas besoin d'attendre F5
 });
@@ -191,7 +198,8 @@ ipcMain.on("journal", (e, texte) => deMdtv(e) && journal("Page : " + String(text
 function menu() {
   return Menu.buildFromTemplate([
     { label: "Ouvrir les réglages", click: ouvrirReglage },
-    { label: jeuLance ? "Afficher / cacher le build (F5)" : "En attente : jeu non lancé", enabled: jeuLance, click: basculer },
+    { label: jeuLance ? "Afficher / cacher le build (F5)" : "En attente : jeu non lancé", enabled: jeuLance, click: basculerBuild },
+    { label: jeuLance ? "Afficher / cacher les sorts (F6)" : "En attente : jeu non lancé", enabled: jeuLance, click: basculerSorts },
     { label: "Journal de détection", click: () => { journal("Journal ouvert"); shell.openPath(fichierJournal()); } },
     { label: verrouille ? "Déplacer le panneau (Ctrl+Maj+D)" : "Fixer le panneau (Ctrl+Maj+D)", click: deplacer },
     { type: "separator" },
