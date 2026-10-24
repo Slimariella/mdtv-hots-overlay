@@ -1,7 +1,7 @@
 {
   "name": "mdtv-hots-overlay",
   "productName": "MDTV Overlay",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Affiche un build Heroes of the Storm du serveur MDTV par-dessus le jeu.",
   "main": "main.js",
   "license": "MIT",
@@ -12,7 +12,8 @@
   },
   "build": {
     "appId": "dev.pages.mdtv-hots.overlay",
-    "files": ["main.js", "preload.js", "icone.png", "package.json"],
+    "files": ["main.js", "preload.js", "detection-partie.js", "icone.png", "package.json"],
+    "extraResources": [{ "from": "heroesdecode", "to": "heroesdecode" }],
     "protocols": [{ "name": "MDTV Overlay", "schemes": ["mdtv-overlay"] }],
     "win": { "target": "nsis" },
     "nsis": { "oneClick": true, "perMachine": false, "shortcutName": "MDTV Overlay" }

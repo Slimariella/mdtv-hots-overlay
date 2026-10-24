@@ -4,6 +4,7 @@
 // F5 n'est pris que pendant que HotS tourne (détecté toutes les 3 s) : le reste du temps, F5 garde son rôle habituel.
 const { app, BrowserWindow, globalShortcut, screen, Tray, Menu, nativeImage, shell, ipcMain } = require("electron");
 const fs = require("fs"), path = require("path"), crypto = require("crypto"), { execFile } = require("child_process");
+const { extraireJoueurs } = require("./detection-partie");
 
 const PAGE = "https://mdtv-hots.pages.dev/";
 const PROTOCOLE = "mdtv-overlay";
@@ -99,6 +100,41 @@ function changerEtat(lance) {
 const etat = () => ({ jeu: jeuLance, build: lire().build || null });
 const envoyerEtat = () => reglage?.webContents.send("etat", etat());
 
+// --- Détection auto du héros en cours de partie (lobby HotS) -----------------------------------------
+// HotS écrit %TEMP%\Heroes of the Storm\TempWriteReplayPx\replay.server.battlelobby pendant le
+// chargement (dossier supprimé à la fermeture). On le décode avec HeroesDecode et on envoie le
+// résultat ([{bt, att}]) à la page de réglage, qui fait le lien avec le BattleTag du joueur.
+const cheminHeroesDecode = () => app.isPackaged
+  ? path.join(process.resourcesPath, "heroesdecode", "HeroesDecode.exe")
+  : path.join(__dirname, "heroesdecode", "HeroesDecode.exe");
+let dernierTraites = {}; // chemin du battlelobby -> date de modif déjà envoyée avec succès
+
+function dossiersBattlelobby() {
+  const base = path.join(process.env.TEMP || "", "Heroes of the Storm");
+  let sousDossiers;
+  try { sousDossiers = fs.readdirSync(base).filter(n => /^TempWriteReplayP/i.test(n)); } catch { return []; }
+  return sousDossiers.map(n => path.join(base, n, "replay.server.battlelobby")).filter(f => fs.existsSync(f));
+}
+
+function detecterPartie() {
+  const fichiers = dossiersBattlelobby(), presents = new Set(fichiers);
+  for (const chemin of Object.keys(dernierTraites)) if (!presents.has(chemin)) delete dernierTraites[chemin]; // jeu fermé : dossier disparu
+  for (const fichier of fichiers) {
+    let mtime;
+    try { mtime = fs.statSync(fichier).mtimeMs; } catch { continue; }
+    if (dernierTraites[fichier] === mtime) continue; // déjà envoyé pour cette version du fichier
+    execFile(cheminHeroesDecode(), ["get-pregame-json", "-p", fichier], { windowsHide: true }, (err, sortie) => {
+      if (err) return; // fichier verrouillé ou décodage raté : on réessaie au tour suivant (même mtime)
+      try {
+        const joueurs = extraireJoueurs(sortie);
+        if (!joueurs.length) return; // lobby pas encore assez avancé : on réessaie au tour suivant
+        dernierTraites[fichier] = mtime;
+        reglage?.webContents.send("partie", joueurs);
+      } catch { /* JSON invalide : on réessaie au tour suivant */ }
+    });
+  }
+}
+
 // --- Connexion Discord dans le navigateur par défaut -------------------------------------------------
 // Le site reçoit le jeton de Discord et le renvoie à l'appli par un lien mdtv-overlay://connexion#access_token=…&state=…
 // Le state est tiré au hasard ici et vérifié au retour : un lien qui ne vient pas de notre demande est ignoré.
@@ -123,11 +159,12 @@ function recevoirLien(lien) {
 // Seule la page MDTV de la fenêtre de réglage peut parler à l'appli.
 const deMdtv = e => e.sender === reglage?.webContents && surMdtv(e.senderFrame?.url || "");
 ipcMain.on("connecter", e => deMdtv(e) && connecter());
-ipcMain.on("enregistrer", (e, lien) => {
+ipcMain.on("enregistrer", (e, lien, afficherMaintenant) => {
   if (!deMdtv(e) || !/^#\/en-jeu\/[\w-]+\/\d{0,7}$/.test(lien)) return;
   ecrire({ ...lire(), build: lien });
   panneau.loadURL(PAGE + lien);
   envoyerEtat();
+  if (afficherMaintenant && jeuLance) panneau.showInactive(); // détection auto : pas besoin d'attendre F5
 });
 ipcMain.handle("etat", e => deMdtv(e) ? etat() : null);
 
@@ -156,7 +193,8 @@ else {
     barre = new Tray(nativeImage.createFromPath(path.join(__dirname, "icone.png")));
     barre.setToolTip("MDTV Overlay — en attente du jeu"); barre.setContextMenu(menu());
     barre.on("click", ouvrirReglage);
-    verifierJeu(); setInterval(verifierJeu, 3000);
+    const tic = () => { verifierJeu(); if (jeuLance) detecterPartie(); };
+    tic(); setInterval(tic, 3000);
     const l = lienDans(process.argv); if (l) reglage.webContents.once("did-finish-load", () => recevoirLien(l));
   });
 }
