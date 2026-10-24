@@ -1,7 +1,7 @@
 {
   "name": "mdtv-hots-overlay",
   "productName": "MDTV Overlay",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Affiche un build Heroes of the Storm du serveur MDTV par-dessus le jeu.",
   "main": "main.js",
   "license": "MIT",

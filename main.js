@@ -91,6 +91,7 @@ function verifierJeu() {
 function changerEtat(lance) {
   if (lance === jeuLance) return;
   jeuLance = lance;
+  journal(lance ? "HotS détecté" : "HotS fermé");
   if (lance) globalShortcut.register("F5", basculer);
   else { globalShortcut.unregister("F5"); panneau.hide(); }
   envoyerEtat();
@@ -108,12 +109,26 @@ const cheminHeroesDecode = () => app.isPackaged
   ? path.join(process.resourcesPath, "heroesdecode", "HeroesDecode.exe")
   : path.join(__dirname, "heroesdecode", "HeroesDecode.exe");
 let dernierTraites = {}; // chemin du battlelobby -> date de modif déjà envoyée avec succès
+// Journal de la détection (menu de l'icône → « Journal de détection ») : chaque étape, pour comprendre un échec à distance.
+const fichierJournal = () => path.join(app.getPath("userData"), "detection.log");
+let derniereLigne = "";
+function journal(texte) {
+  if (texte === derniereLigne) return; // pas de répétition toutes les 3 s
+  derniereLigne = texte;
+  const ligne = new Date().toLocaleString("fr-FR") + "  " + texte + "\n";
+  try {
+    const avant = fs.existsSync(fichierJournal()) ? fs.readFileSync(fichierJournal(), "utf8").split("\n").slice(-300).join("\n") : "";
+    fs.writeFileSync(fichierJournal(), avant + ligne);
+  } catch {}
+}
 
 function dossiersBattlelobby() {
   const base = path.join(process.env.TEMP || "", "Heroes of the Storm");
-  let sousDossiers;
-  try { sousDossiers = fs.readdirSync(base).filter(n => /^TempWriteReplayP/i.test(n)); } catch { return []; }
-  return sousDossiers.map(n => path.join(base, n, "replay.server.battlelobby")).filter(f => fs.existsSync(f));
+  let tout;
+  try { tout = fs.readdirSync(base); } catch { journal("Dossier absent : " + base); return []; }
+  const fichiers = tout.filter(n => /^TempWriteReplayP/i.test(n)).map(n => path.join(base, n, "replay.server.battlelobby")).filter(f => fs.existsSync(f));
+  if (!fichiers.length) journal("Pas de fichier de partie. Contenu de " + base + " : " + (tout.join(", ") || "vide"));
+  return fichiers;
 }
 
 function detecterPartie() {
@@ -123,14 +138,18 @@ function detecterPartie() {
     let mtime;
     try { mtime = fs.statSync(fichier).mtimeMs; } catch { continue; }
     if (dernierTraites[fichier] === mtime) continue; // déjà envoyé pour cette version du fichier
-    execFile(cheminHeroesDecode(), ["get-pregame-json", "-p", fichier], { windowsHide: true }, (err, sortie) => {
-      if (err) return; // fichier verrouillé ou décodage raté : on réessaie au tour suivant (même mtime)
+    journal("Fichier de partie trouvé : " + fichier);
+    execFile(cheminHeroesDecode(), ["get-pregame-json", "-p", fichier], { windowsHide: true }, (err, sortie, erreurs) => {
+      // fichier verrouillé ou décodage raté : on réessaie au tour suivant (même mtime)
+      if (err) return journal("Décodage raté : " + err.message.slice(0, 200) + " " + String(erreurs || "").slice(0, 300));
       try {
         const joueurs = extraireJoueurs(sortie);
-        if (!joueurs.length) return; // lobby pas encore assez avancé : on réessaie au tour suivant
+        // lobby pas encore assez avancé : on réessaie au tour suivant
+        if (!joueurs.length) return journal("Décodé, mais aucun joueur avec BattleTag + héros. Début : " + String(sortie).slice(0, 300).replace(/\s+/g, " "));
         dernierTraites[fichier] = mtime;
+        journal("Joueurs : " + joueurs.map(j => j.bt + "=" + j.att).join(", "));
         reglage?.webContents.send("partie", joueurs);
-      } catch { /* JSON invalide : on réessaie au tour suivant */ }
+      } catch (e) { journal("Sortie illisible : " + String(sortie).slice(0, 300).replace(/\s+/g, " ")); }
     });
   }
 }
@@ -167,11 +186,13 @@ ipcMain.on("enregistrer", (e, lien, afficherMaintenant) => {
   if (afficherMaintenant && jeuLance) panneau.showInactive(); // détection auto : pas besoin d'attendre F5
 });
 ipcMain.handle("etat", e => deMdtv(e) ? etat() : null);
+ipcMain.on("journal", (e, texte) => deMdtv(e) && journal("Page : " + String(texte).slice(0, 300)));
 
 function menu() {
   return Menu.buildFromTemplate([
     { label: "Ouvrir les réglages", click: ouvrirReglage },
     { label: jeuLance ? "Afficher / cacher le build (F5)" : "En attente : jeu non lancé", enabled: jeuLance, click: basculer },
+    { label: "Journal de détection", click: () => { journal("Journal ouvert"); shell.openPath(fichierJournal()); } },
     { label: verrouille ? "Déplacer le panneau (Ctrl+Maj+D)" : "Fixer le panneau (Ctrl+Maj+D)", click: deplacer },
     { type: "separator" },
     { label: "Quitter", click: () => { app.quitte = true; app.quit(); } },

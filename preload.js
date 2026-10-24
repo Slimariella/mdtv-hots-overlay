@@ -1,4 +1,4 @@
-// Fenêtre de réglage : la page MDTV ne reçoit que ces trois fonctions (rien d'autre de Node / Electron).
+// Fenêtre de réglage : la page MDTV ne reçoit que ces fonctions (rien d'autre de Node / Electron).
 const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("mdtvOverlay", {
@@ -11,4 +11,6 @@ contextBridge.exposeInMainWorld("mdtvOverlay", {
   },
   // Appelé avec [{bt, att}] quand l'appli détecte une nouvelle partie (lobby HotS décodé).
   surPartie: rappel => ipcRenderer.on("partie", (e, joueurs) => rappel(joueurs)),
+  // Résultat de la détection côté page, ajouté au journal de l'appli.
+  journal: texte => ipcRenderer.send("journal", String(texte)),
 });
